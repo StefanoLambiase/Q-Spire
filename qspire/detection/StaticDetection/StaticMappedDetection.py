@@ -5801,12 +5801,18 @@ def autofix_map_detect( file_path:str ):
     lock = threading.Lock()
 
     
+    # qspire-fix: analyse at most QSPIRE_FUNCTION_JOBS functions at a time (each one runs
+    # Python subprocesses that import Qiskit); one thread per function exhausted memory on
+    # files with many test functions
+    slots = threading.BoundedSemaphore(int(os.environ.get("QSPIRE_FUNCTION_JOBS", str(os.cpu_count() or 2))))
+
     def process_exe(exe):
-        try:
-            result = get_function_smells(exe, executables_dict[exe])
-            with lock:
-                smells_dict[exe] = result
-        except: pass
+        with slots:
+            try:
+                result = get_function_smells(exe, executables_dict[exe])
+                with lock:
+                    smells_dict[exe] = result
+            except: pass
 
     for exe in executables_dict:
         
