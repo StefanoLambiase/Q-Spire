@@ -170,7 +170,16 @@ class RunExecuteParametersCalls:
         # parameters at execution time, so they count as a binding as well
         if func_name == 'run' and args:
             pubs = args[0] if isinstance(args[0], (list, tuple)) else [args[0]]
-            if any(isinstance(p, tuple) and len(p) >= 2 and p[1] is not None for p in pubs):
+            def _binds(p):
+                if isinstance(p, tuple):  # (circuit, parameter_values, ...)
+                    return len(p) >= 2 and p[1] is not None
+                # coerced SamplerPub / EstimatorPub objects
+                values = getattr(p, 'parameter_values', None)
+                try:
+                    return int(getattr(values, 'num_parameters', 0) or 0) > 0
+                except Exception:
+                    return False
+            if any(_binds(p) for p in pubs):
                 self.call_info['assign_parameters'].append(dict(call_record))
         
         # Execute the original function
