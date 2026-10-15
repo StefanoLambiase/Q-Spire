@@ -293,16 +293,47 @@ class MockResult:
 class FunctionCallInstrumentor(ast.NodeTransformer):
     """AST transformer to instrument function calls."""
     
+    _PM_NAME = re.compile(r"(?i)(^|_)(pm|pass_?manager|passmanager)s?$")
+    _PM_CALL = re.compile(r"(?i)pass_?manager")
+
     def __init__(self, tracker):
         self.tracker = tracker
         self.target_functions = tracker.target_functions
-    
+        self.pm_vars = set()
+
+    def visit_Module(self, node):
+        # qspire-fix: names bound to pass managers (PassManager(...), generate_preset_pass_manager(...));
+        # their run() transpiles and is not an execution. Needed when the object itself is a mock.
+        for n in ast.walk(node):
+            if isinstance(n, ast.Assign) and isinstance(n.value, ast.Call):
+                f = n.value.func
+                fname = f.id if isinstance(f, ast.Name) else f.attr if isinstance(f, ast.Attribute) else ""
+                if self._PM_CALL.search(fname or ""):
+                    for t in n.targets:
+                        if isinstance(t, ast.Name):
+                            self.pm_vars.add(t.id)
+                        elif isinstance(t, ast.Attribute):
+                            self.pm_vars.add(t.attr)
+        self.generic_visit(node)
+        return node
+
+    def _is_pass_manager(self, receiver):
+        if isinstance(receiver, ast.Call):  # e.g. PassManager([...]).run(circuit)
+            f = receiver.func
+            fname = f.id if isinstance(f, ast.Name) else f.attr if isinstance(f, ast.Attribute) else ""
+            return bool(self._PM_CALL.search(fname or ""))
+        name = receiver.id if isinstance(receiver, ast.Name) else receiver.attr if isinstance(receiver, ast.Attribute) else None
+        return bool(name) and (name in self.pm_vars or bool(self._PM_NAME.search(name)))
+
     def visit_Call(self, node):
         self.generic_visit(node)
         
         if isinstance(node.func, ast.Attribute):
             method_name = node.func.attr
-            
+
+            if method_name == 'run' and self._is_pass_manager(node.func.value):
+                return node  # qspire-fix: pass manager, not an execution
+
             if method_name in self.target_functions:
                 # Get column end position
                 column_end = getattr(node, 'end_col_offset', node.col_offset + len(method_name))
