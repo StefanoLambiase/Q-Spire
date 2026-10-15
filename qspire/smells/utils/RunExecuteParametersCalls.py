@@ -101,7 +101,12 @@ class RunExecuteParametersCalls:
                 sys.settrace(_deadline_tracer)
                 try:
                     with ctx:
-                        exec(compiled_code, exec_globals)
+                        if os.environ.get("QSPIRE_TRACKER", "") == "legacy":
+                            exec(compiled_code, exec_globals)
+                        else:
+                            # qspire-fix: statement by statement, so that a failing statement
+                            # does not stop the rest (this replaces AutoFix in static mode)
+                            self._exec_tolerant(instrumented_tree, filepath, exec_globals)
                 finally:
                     sys.settrace(previous_tracer)
             except SystemExit as e:
@@ -142,6 +147,46 @@ class RunExecuteParametersCalls:
         
         return run_calls, execute_calls, assign_parameters_calls, bind_parameters_calls
     
+    def _exec_tolerant(self, module, filename, g):
+        """Run a module statement by statement (descending into the `__main__` block).
+
+        A statement that raises is skipped. When it raises NameError, the undefined name is
+        bound to a permissive mock and the statement is run again (as AutoFix would mock it);
+        the calls recorded during the failed attempt are discarded first.
+        """
+        from smells.utils.mock_missing import Mock
+
+        def is_main(node):
+            t = getattr(node, "test", None)
+            return (isinstance(node, ast.If) and isinstance(t, ast.Compare) and isinstance(t.left, ast.Name)
+                    and t.left.id == "__name__" and len(t.comparators) == 1
+                    and isinstance(t.comparators[0], ast.Constant) and t.comparators[0].value == "__main__")
+
+        def run_list(stmts):
+            for node in stmts:
+                if is_main(node):
+                    run_list(node.body)
+                    continue
+                code = compile(ast.Module(body=[node], type_ignores=[]), filename, "exec")
+                for _ in range(6):
+                    saved = {k: len(v) for k, v in self.call_info.items()}
+                    try:
+                        exec(code, g)
+                        break
+                    except NameError as e:
+                        m = re.search(r"name '(\w+)' is not defined", str(e))
+                        if not m or m.group(1) in g:
+                            break
+                        for k in list(self.call_info):
+                            del self.call_info[k][saved.get(k, 0):]
+                        g[m.group(1)] = Mock(m.group(1))
+                    except (SystemExit, TimeoutError):
+                        raise
+                    except Exception:
+                        break
+
+        run_list(module.body)
+
     def _track_function_call(self, func_name: str, row: int, column_start: int, column_end: int, 
                            original_obj, original_method_name, circuit_info, *args, **kwargs):
         """Track a function call and execute the original function."""

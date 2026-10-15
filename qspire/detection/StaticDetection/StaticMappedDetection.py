@@ -5669,9 +5669,15 @@ def get_function_smells(exe, executables_dict_exe):
     
     
     # Start thread for auto_fix_with_mapping (we keep only the mappings)
-    mappings = threading.Thread(target=wrapper, args=(lambda p: auto_fix_with_mapping(p, debug=False)[1], result, 'auto_fix_with_mapping', Path(exe)))
-    mappings.start()
-    threads.append(mappings)
+    # qspire-fix: with the real circuit tracker, the detectors run the generated script
+    # statement by statement and skip (or mock) what fails, so AutoFix is not needed; it
+    # was the slowest step and could delete circuit-building code. QSPIRE_AUTOFIX=1 keeps it.
+    if _real_tracker() and os.environ.get("QSPIRE_AUTOFIX", "0") != "1":
+        result['auto_fix_with_mapping'] = {}
+    else:
+        mappings = threading.Thread(target=wrapper, args=(lambda p: auto_fix_with_mapping(p, debug=False)[1], result, 'auto_fix_with_mapping', Path(exe)))
+        mappings.start()
+        threads.append(mappings)
     
 
     # Wait for all threads to finish for this exe
