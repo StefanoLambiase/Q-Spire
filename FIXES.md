@@ -19,6 +19,7 @@ This branch fixes problems found while validating Q-Spire's detections for the E
 | 11 | All functions of a file are analysed at once, one thread per function, and every detector re-runs the same script. AutoFix and NC runs have no time limit. | Memory peaks on files with many test functions, and runs can hang on long-running code. | — |
 | 12 | When later code fails on the mock circuit (e.g., the circuit is passed to `circuit_to_dag` or a pass manager), AutoFix deletes the whole assignment of the circuit and its uses, replacing it with a generic mock. | The circuit disappears from the script that the detectors analyse. | r27 |
 | 13 | When AutoFix fails (e.g., a final `assert` that cannot hold with mocks), it stores `None` as mapping. `get_function_smells` then calls `.items()` on `None` inside a bare `except: pass`. | All smells of the function are lost silently. | r28 |
+| 14 | The mocked `self` returns `None` for every method, so `with self.subTest(...)` and `with self.assertRaises(...)` fail, and AutoFix deletes the whole block. | Circuits built inside such blocks, common in test files, are lost. | r26 |
 | 15 | The ROC detector returns a flat list of rows, while the row mapping expects tuples. | ROC rows were never mapped to the original file: they are lines of the generated script. | — |
 | 16 | NC counts `run()` on any object. When the object is a mock (e.g., a pass manager whose passes come from a missing package), a transpilation is counted as an execution. | False NC. | r30 |
 | 17 | Code written for Qiskit < 1.0 uses `qc += other` and `qc1 + qc2`, which no longer exist. | The statement fails and the added part is missing (e.g., two barriers end up next to each other, a false ROC). | r32 |
@@ -27,7 +28,6 @@ This branch fixes problems found while validating Q-Spire's detections for the E
 | 20 | The line mapping picks the first line with the same text. | When a statement occurs twice in a function, the reported row is the first occurrence. | — |
 | 21 | IM counts a barrier after a measurement as an operation. | A measurement followed only by barriers (a terminal measurement) is reported as IM; QSmell skips barriers. | r35 |
 | 22 | NC counts `pass_.run(dag)` when the pass comes from a missing package (a mock). | False NC. | r36 |
-| 14 | The mocked `self` returns `None` for every method, so `with self.subTest(...)` and `with self.assertRaises(...)` fail, and AutoFix deletes the whole block. | Circuits built inside such blocks, common in test files, are lost. | r26 |
 
 The regression suite is in `regression/` (35 cases with expected smells; `regression/known_limitations/` holds one case that is still wrong):
 
