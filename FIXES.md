@@ -17,11 +17,14 @@ This branch fixes problems found while validating Q-Spire's detections for the E
 | 9 | The mock `QuantumCircuit` constructor fails with registers, unknown sizes (`self.n`) or extra arguments. AutoFix then replaces the whole constructor call with an unrelated mock. | Circuits built with registers or with sizes from test attributes are lost. | r24 |
 | 10 | AutoFix stops at the first missing third-party module ("Required library ... is not installed"). | Results depend on the packages installed on the machine. Without the project's dependencies, almost no circuit smell and no NC is detected. CG and LPQ are not affected, since they are AST-based. | — |
 | 11 | All functions of a file are analysed at once, one thread per function, and every detector re-runs the same script. AutoFix and NC runs have no time limit. | Memory peaks on files with many test functions, and runs can hang on long-running code. | — |
+| 12 | When later code fails on the mock circuit (e.g., the circuit is passed to `circuit_to_dag` or a pass manager), AutoFix deletes the whole assignment of the circuit and its uses, replacing it with a generic mock. | The circuit disappears from the script that the detectors analyse. | r27 |
+| 13 | When AutoFix fails (e.g., a final `assert` that cannot hold with mocks), it stores `None` as mapping. `get_function_smells` then calls `.items()` on `None` inside a bare `except: pass`. | All smells of the function are lost silently. | r28 |
+| 14 | The mocked `self` returns `None` for every method, so `with self.subTest(...)` and `with self.assertRaises(...)` fail, and AutoFix deletes the whole block. | Circuits built inside such blocks, common in test files, are lost. | r26 |
 
-The regression suite is in `regression/` (25 cases with expected smells):
+The regression suite is in `regression/` (28 cases with expected smells):
 
-- Original version: 6–8 of 25. The original version is not deterministic on a few cases.
-- This branch: 25 of 25.
+- Original version: 7–9 of 28. The original version is not deterministic on a few cases.
+- This branch: 28 of 28.
 
 ## 2. Changes
 
@@ -40,8 +43,10 @@ The regression suite is in `regression/` (25 cases with expected smells):
   - a star import from `qiskit`, unless the file defines its own `transpile`.
 
   Calls with `**kwargs` are skipped.
+- **`smells/LC/LCDetector.py`.** An unused and slow call (`analyze_circuits_backends_runs`, whose result was overwritten) is removed from the static branch.
 - **`smells/CG/CGDetector.py`.** A bare `unitary(...)` counts only if it is imported from Qiskit. `.unitary(...)` needs a matrix and qubits.
 - **`smells/utils/RunExecuteParametersCalls.py` (NC).**
+  - The script is run statement by statement (see AutoFix below), descending into the `__main__` block.
   - `PassManager.run` is not an execution.
   - PUBs with parameter values count as a binding.
   - The in-process execution stops after `QSPIRE_NC_EXEC_TIMEOUT` seconds.
@@ -52,6 +57,10 @@ The regression suite is in `regression/` (25 cases with expected smells):
 - **`detection/StaticDetection/StaticMappedDetection.py` and `AutoFix_Mapping.py`.**
   - At most `QSPIRE_FUNCTION_JOBS` functions of a file are analysed at once.
   - Each AutoFix run of a script stops after `QSPIRE_AUTOFIX_RUN_TIMEOUT` seconds. A script that runs that long is treated as fixed.
+  - A copy of each generated script is kept before AutoFix (`<script>.prefix`). The circuit tracker runs this copy; a statement that fails is skipped there, so no circuit-building code is deleted. The line mapping is computed on the same copy, instead of racing with AutoFix on the same file. The copy is not used if it has a syntax error that only AutoFix repairs.
+  - **AutoFix is skipped** when the new tracker is used (`QSPIRE_AUTOFIX=1` restores it). The detectors run the generated script statement by statement and skip what fails. For NC, an undefined name is bound to a mock and the statement is run again, as AutoFix would do, after discarding the calls recorded in the failed attempt. AutoFix took about 80% of the analysis time, since it re-runs the script after every fix, and it could delete circuit-building code. Without it, the analysis is about four times faster.
+  - A failed AutoFix no longer drops the smells of the function. The row mapping of each smell is guarded, and errors are printed instead of being swallowed.
+- **`detection/StaticDetection/StaticCircuit.py` (mocked `self`).** Methods of the mocked `self` return an object that can be called, iterated and used as a context manager, and that suppresses exceptions on exit, as `subTest` and `assertRaises` do.
 
 ## 3. Environment variables
 
@@ -62,6 +71,7 @@ The regression suite is in `regression/` (25 cases with expected smells):
 | `QSPIRE_STATEMENT_TIMEOUT` | 30 | seconds per top-level statement in the runner |
 | `QSPIRE_TRACKER_JOBS` | CPU count | concurrent circuit-runner processes |
 | `QSPIRE_FUNCTION_JOBS` | CPU count | functions of a file analysed at once |
+| `QSPIRE_AUTOFIX` | 0 | 1 runs AutoFix as in the original version (with the new tracker it is skipped) |
 | `QSPIRE_AUTOFIX_RUN_TIMEOUT` | 60 | seconds per AutoFix run of a generated script |
 | `QSPIRE_NC_EXEC_TIMEOUT` | 60 | seconds for the NC execution of a generated script |
 | `QSPIRE_MOCK_MISSING_MODULES` | 1 | mock third-party modules that are not installed |
