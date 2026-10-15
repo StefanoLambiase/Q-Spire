@@ -1,3 +1,4 @@
+passed: {'legacy': 10, 'real': 35} of 35
 r01_terminal_only | legacy: BAD [('IM', '0'), ('IM', '1'), ('ROC', '')] | real: OK  [] | expected []
 r02_two_functions_same_name | legacy: BAD [('IM', '0'), ('IM', '1'), ('ROC', '')] | real: OK  [] | expected []
 r03_im_with_return | legacy: BAD [] | real: OK  [('IM', '0')] | expected [('IM', '0')]
@@ -31,4 +32,5 @@ r31_u2_u3_names | legacy: OK  [] | real: OK  [] | expected []
 r32_circuit_addition | legacy: BAD [] | real: OK  [('IM', '0')] | expected [('IM', '0')]
 r33_nc_pass_on_dag | legacy: BAD [('NC', '')] | real: OK  [] | expected []
 r34_nc_values_in_run | legacy: BAD [('ROC', '')] | real: OK  [] | expected []
-passed: {'legacy': 9, 'real': 33} of 33
+r35_im_barrier_after_measure | legacy: BAD [('IM', '0'), ('IM', '1'), ('LC', '')] | real: OK  [] | expected []
+r36_nc_named_pass_on_dag | legacy: OK  [] | real: OK  [] | expected []

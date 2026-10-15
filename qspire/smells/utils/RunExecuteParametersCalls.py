@@ -352,13 +352,32 @@ class FunctionCallInstrumentor(ast.NodeTransformer):
         self.generic_visit(node)
         return node
 
+    _DAG_NAME = re.compile(r"(?i)dag")
+    _PASS_NAME = re.compile(r"(?i)(^|_)pass(es)?_?$")
+
+    def _runs_on_dag(self, node):
+        # e.g. pass_.run(dag) or SomePass().run(circuit_to_dag(qc)): transpiler passes on DAGs
+        if not node.args:
+            return False
+        a = node.args[0]
+        if isinstance(a, ast.Name):
+            return bool(self._DAG_NAME.search(a.id))
+        if isinstance(a, ast.Attribute):
+            return bool(self._DAG_NAME.search(a.attr))
+        if isinstance(a, ast.Call):
+            f = a.func
+            fname = f.id if isinstance(f, ast.Name) else f.attr if isinstance(f, ast.Attribute) else ""
+            return bool(self._DAG_NAME.search(fname or ""))
+        return False
+
     def _is_pass_manager(self, receiver):
         if isinstance(receiver, ast.Call):  # e.g. PassManager([...]).run(circuit)
             f = receiver.func
             fname = f.id if isinstance(f, ast.Name) else f.attr if isinstance(f, ast.Attribute) else ""
             return bool(self._PM_CALL.search(fname or ""))
         name = receiver.id if isinstance(receiver, ast.Name) else receiver.attr if isinstance(receiver, ast.Attribute) else None
-        return bool(name) and (name in self.pm_vars or bool(self._PM_NAME.search(name)))
+        return bool(name) and (name in self.pm_vars or bool(self._PM_NAME.search(name))
+                               or bool(self._PASS_NAME.search(name)))
 
     def visit_Call(self, node):
         self.generic_visit(node)
@@ -366,8 +385,8 @@ class FunctionCallInstrumentor(ast.NodeTransformer):
         if isinstance(node.func, ast.Attribute):
             method_name = node.func.attr
 
-            if method_name == 'run' and self._is_pass_manager(node.func.value):
-                return node  # qspire-fix: pass manager, not an execution
+            if method_name == 'run' and (self._is_pass_manager(node.func.value) or self._runs_on_dag(node)):
+                return node  # qspire-fix: pass manager or transpiler pass, not an execution
 
             if method_name in self.target_functions:
                 # Get column end position

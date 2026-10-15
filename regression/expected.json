@@ -124,5 +124,7 @@
   ]
  ],
  "r33_nc_pass_on_dag": [],
- "r34_nc_values_in_run": []
+ "r34_nc_values_in_run": [],
+ "r35_im_barrier_after_measure": [],
+ "r36_nc_named_pass_on_dag": []
 }

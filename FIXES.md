@@ -25,12 +25,14 @@ This branch fixes problems found while validating Q-Spire's detections for the E
 | 18 | `u1`/`u2`/`u3` were mapped to `p`/`u`/`u`. | `u2` followed by `u3` looked like a repetition (false ROC). | r31 |
 | 19 | NC counts `run()` of transpiler passes on DAGs, and ignores parameter values passed to `run()` next to the circuits (V1 primitives, gradients, `parameter_binds`). | False NC. | r33, r34 |
 | 20 | The line mapping picks the first line with the same text. | When a statement occurs twice in a function, the reported row is the first occurrence. | — |
+| 21 | IM counts a barrier after a measurement as an operation. | A measurement followed only by barriers (a terminal measurement) is reported as IM; QSmell skips barriers. | r35 |
+| 22 | NC counts `pass_.run(dag)` when the pass comes from a missing package (a mock). | False NC. | r36 |
 | 14 | The mocked `self` returns `None` for every method, so `with self.subTest(...)` and `with self.assertRaises(...)` fail, and AutoFix deletes the whole block. | Circuits built inside such blocks, common in test files, are lost. | r26 |
 
-The regression suite is in `regression/` (33 cases with expected smells; `regression/known_limitations/` holds one case that is still wrong):
+The regression suite is in `regression/` (35 cases with expected smells; `regression/known_limitations/` holds one case that is still wrong):
 
-- Original version: 9 of 33 in the last run. The original version is not deterministic on a few cases.
-- This branch: 33 of 33.
+- Original version: 10 of 35 in the last run. The original version is not deterministic on a few cases.
+- This branch: 35 of 35.
 
 ## 2. Changes
 
@@ -52,10 +54,11 @@ The regression suite is in `regression/` (33 cases with expected smells; `regres
 
   Calls with `**kwargs` are skipped.
 - **`smells/LC/LCDetector.py`.** An unused and slow call (`analyze_circuits_backends_runs`, whose result was overwritten) is removed from the static branch.
+- **`smells/IM/IMDetector.py`.** Barriers are skipped: a measurement followed only by barriers is terminal.
 - **`smells/CG/CGDetector.py`.** A bare `unitary(...)` counts only if it is imported from Qiskit. `.unitary(...)` needs a matrix and qubits.
 - **`smells/utils/RunExecuteParametersCalls.py` (NC).**
   - The script is run statement by statement (see AutoFix below), descending into the `__main__` block.
-  - `run()` of a transpiler pass, or on a DAG, is not an execution. Parameter values passed to `run()` next to the circuits (`run(circuits, observables, values)`, `parameter_values=`, `parameter_binds=`) count as a binding.
+  - `run()` of a transpiler pass, or on a DAG, is not an execution (also when the pass is a mock: receivers named like `pass_`, or a first argument named like `dag`). Parameter values passed to `run()` next to the circuits (`run(circuits, observables, values)`, `parameter_values=`, `parameter_binds=`) count as a binding.
   - `PassManager.run` is not an execution: neither when the object is a pass manager, nor when the receiver is a name bound to `PassManager(...)`/`generate_preset_pass_manager(...)` in the source, a name such as `pm` or `pass_manager`, or a `PassManager(...).run(...)` chain.
   - PUBs with parameter values count as a binding.
   - The in-process execution stops after `QSPIRE_NC_EXEC_TIMEOUT` seconds.
