@@ -1383,7 +1383,7 @@ except Exception as e:
     # Create a basic mock instead
     self = type('Mock{containing_class}', (), {{
         '__init__': lambda self, *args, **kwargs: None,
-        '__getattr__': lambda self, name: lambda *args, **kwargs: None
+        '__getattr__': lambda self, name: (lambda *args, **kwargs: type('QSpireAny', (), {{'__enter__': lambda c: c, '__exit__': lambda c, *e: True, '__call__': lambda c, *a, **k: c, '__iter__': lambda c: iter(()), '__bool__': lambda c: True}})())
     }})()'''
                     else:
                         return f'''# Create instance
@@ -1394,13 +1394,13 @@ except Exception as e:
     # Create a basic mock instead
     self = type('Mock{containing_class}', (), {{
         '__init__': lambda self, *args, **kwargs: None,
-        '__getattr__': lambda self, name: lambda *args, **kwargs: None
+        '__getattr__': lambda self, name: (lambda *args, **kwargs: type('QSpireAny', (), {{'__enter__': lambda c: c, '__exit__': lambda c, *e: True, '__call__': lambda c, *a, **k: c, '__iter__': lambda c: iter(()), '__bool__': lambda c: True}})())
     }})()'''
                 else:
                     # No constructor parameters found, create a basic mock
                     return f'''self = type('Mock{containing_class}', (), {{
     '__init__': lambda self, *args, **kwargs: None,
-    '__getattr__': lambda self, name: lambda *args, **kwargs: None,
+    '__getattr__': lambda self, name: (lambda *args, **kwargs: type('QSpireAny', (), {{'__enter__': lambda c: c, '__exit__': lambda c, *e: True, '__call__': lambda c, *a, **k: c, '__iter__': lambda c: iter(()), '__bool__': lambda c: True}})()),
     'qubits': [],
     'num_qubits': 2
 }})()  # Mock instance'''

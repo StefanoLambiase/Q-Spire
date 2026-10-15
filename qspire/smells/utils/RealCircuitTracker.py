@@ -29,8 +29,25 @@ LAST_ERRORS = {}
 _inflight = {}
 
 
+def _parses(p):
+    """False if the script has a syntax error (e.g., `yield` inlined in the main block),
+    which only AutoFix repairs."""
+    import ast
+    try:
+        with open(p, encoding="utf-8") as f:
+            ast.parse(f.read())
+        return True
+    except Exception:
+        return False
+
+
 def analyze_quantum_file(input_file, output_file=None, debug=False, timeout=None):
     path = os.path.abspath(input_file)
+    # Static mode keeps a copy of each generated script before AutoFix (<script>.prefix):
+    # run that copy, since statements that fail are skipped here and AutoFix may have
+    # deleted circuit-building code. Rows then refer to the script before AutoFix.
+    if os.path.exists(path + ".prefix") and _parses(path + ".prefix"):
+        path = path + ".prefix"
     try:
         key = (path, os.path.getmtime(path), os.path.getsize(path))
     except OSError:

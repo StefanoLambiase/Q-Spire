@@ -96,5 +96,23 @@
    "IM",
    "3"
   ]
+ ],
+ "r26_subtest_blocks": [
+  [
+   "IM",
+   "0"
+  ]
+ ],
+ "r27_downstream_failure": [
+  [
+   "IM",
+   "0"
+  ]
+ ],
+ "r28_failing_assert": [
+  [
+   "IM",
+   "0"
+  ]
  ]
 }
