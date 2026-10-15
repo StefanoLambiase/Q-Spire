@@ -15,7 +15,11 @@ import threading
 _RUNNER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_real_circuit_runner.py")
 _MARK = "@@QSPIRE_JSON@@"
 _cache = {}
+_CACHE_MAX = 256
 _lock = threading.Lock()
+# Q-Spire analyses all functions of a file in parallel threads; limit the number of
+# concurrent runner processes (each imports Qiskit) to avoid exhausting memory.
+_slots = threading.BoundedSemaphore(int(os.environ.get("QSPIRE_TRACKER_JOBS", str(os.cpu_count() or 2))))
 LAST_ERRORS = {}
 
 
@@ -32,8 +36,9 @@ def analyze_quantum_file(input_file, output_file=None, debug=False, timeout=None
     per_stmt = os.environ.get("QSPIRE_STATEMENT_TIMEOUT", "30")
     circuits, errors = {}, []
     try:
-        proc = subprocess.run([sys.executable, _RUNNER, path, per_stmt], capture_output=True, text=True,
-                              timeout=timeout, cwd=os.path.dirname(path))
+        with _slots:
+            proc = subprocess.run([sys.executable, _RUNNER, path, per_stmt], capture_output=True, text=True,
+                                  timeout=timeout, cwd=os.path.dirname(path))
         for line in proc.stdout.splitlines()[::-1]:
             if line.startswith(_MARK):
                 data = json.loads(line[len(_MARK):])
@@ -45,9 +50,12 @@ def analyze_quantum_file(input_file, output_file=None, debug=False, timeout=None
         errors = ["runner timeout"]
     except Exception as e:  # noqa
         errors = [f"runner failure: {type(e).__name__}: {e}"]
-    if debug:
-        print(f"[RealCircuitTracker] {path}: {len(circuits)} circuits; errors: {errors[:5]}")
+    if debug or os.environ.get("QSPIRE_TRACKER_DEBUG"):
+        sizes = {k: len(v) for k, v in circuits.items()}
+        print(f"[RealCircuitTracker] {path}: circuits {sizes}; errors: {errors[:5]}", file=sys.stderr)
     with _lock:
+        if len(_cache) >= _CACHE_MAX:
+            _cache.pop(next(iter(_cache)))
         _cache[key] = circuits
         LAST_ERRORS[path] = errors
     if output_file:

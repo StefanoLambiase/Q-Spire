@@ -1004,7 +1004,13 @@ class MockParameterView:
 
 class MockQuantumCircuit:
     """Enhanced mock QuantumCircuit with proper parameter handling - FIXED VERSION."""
-    def __init__(self, num_qubits=2, num_clbits=0, name=None):
+    def __init__(self, num_qubits=2, num_clbits=0, name=None, *args, **kwargs):
+        # qspire-fix: accept registers, bit lists, unknown sizes and extra arguments, so that
+        # AutoFix does not replace the constructor call with an unrelated mock instance
+        num_qubits = self._qs_size(num_qubits, 2)
+        num_clbits = self._qs_size(num_clbits, 0)
+        if not isinstance(name, str):
+            name = None
         self.num_qubits = num_qubits
         self.num_clbits = num_clbits
         self.name = name or "circuit"
@@ -1023,6 +1029,21 @@ class MockQuantumCircuit:
         self.data = []  # Instructions
         self.global_phase = 0
     
+    @staticmethod
+    def _qs_size(x, default):
+        if isinstance(x, bool):
+            return default
+        if isinstance(x, int):
+            return max(x, 0)
+        try:
+            return len(x)
+        except Exception:
+            pass
+        try:
+            return max(int(x), 0)
+        except Exception:
+            return default
+
     @property
     def num_parameters(self):
         """Return the number of parameters as an integer (CRITICAL FIX for numpy compatibility)."""

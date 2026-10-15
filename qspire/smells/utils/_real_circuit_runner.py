@@ -55,6 +55,37 @@ def _max_int(rep):
     return None
 
 
+def _compat_aliases(QuantumCircuit):
+    """Re-add QuantumCircuit methods removed in Qiskit 1.0/2.0 as thin aliases."""
+    import math
+    from qiskit.circuit import Instruction, InstructionSet
+
+    def alias(name, fn):
+        if not hasattr(QuantumCircuit, name):
+            setattr(QuantumCircuit, name, fn)
+
+    alias("cnot", lambda self, c, t, *a, **k: self.cx(c, t))
+    alias("toffoli", lambda self, c1, c2, t, *a, **k: self.ccx(c1, c2, t))
+    alias("fredkin", lambda self, c, t1, t2, *a, **k: self.cswap(c, t1, t2))
+    alias("i", lambda self, q: self.id(q))
+    alias("u1", lambda self, lam, q: self.p(lam, q))
+    alias("u2", lambda self, phi, lam, q: self.u(math.pi / 2, phi, lam, q))
+    alias("u3", lambda self, theta, phi, lam, q: self.u(theta, phi, lam, q))
+    alias("cu1", lambda self, lam, c, t, *a, **k: self.cp(lam, c, t))
+    alias("cu3", lambda self, theta, phi, lam, c, t, *a, **k: self.cu(theta, phi, lam, 0, c, t))
+    alias("mct", lambda self, controls, target, *a, **k: self.mcx(controls, target))
+    alias("bind_parameters", lambda self, values: self.assign_parameters(values))
+    alias("snapshot", lambda self, *a, **k: None)
+    alias("combine", lambda self, other: self.compose(other))
+    alias("extend", lambda self, other: self.compose(other, inplace=True) or self)
+    if not hasattr(QuantumCircuit, "__add__"):
+        QuantumCircuit.__add__ = lambda self, other: self.compose(other)
+    # c_if was removed in Qiskit 2.0: keep the operation, drop the classical condition
+    for cls in (InstructionSet, Instruction):
+        if not hasattr(cls, "c_if"):
+            cls.c_if = lambda self, *a, **k: self
+
+
 def main():
     script = os.path.abspath(sys.argv[1])
     per_stmt_timeout = int(sys.argv[2]) if len(sys.argv) > 2 else 30
@@ -72,6 +103,10 @@ def main():
     # Keep the real QuantumCircuit: neutralize the mock alias of the generated scripts.
     src_exec = re.sub(r"(?m)^QuantumCircuit[ \t]*=[ \t]*MockQuantumCircuit[ \t]*$",
                       "pass  # qspire-fix: real QuantumCircuit", src)
+    # When AutoFix replaced a failing constructor call with a mock instance, use an empty
+    # real circuit instead: it grows on first use, so the following operations are kept.
+    src_exec = re.sub(r"(?m)^([ \t]*)([\w.]+)[ \t]*=[ \t]*MockQuantumCircuit\(\)[ \t]*# mock instance of QuantumCircuit[ \t]*$",
+                      r"\1\2 = QuantumCircuit()  # qspire-fix: real circuit", src_exec)
     try:
         tree = ast.parse(src_exec)
     except SyntaxError as e:
@@ -108,11 +143,40 @@ def main():
             f = f.f_back
         return None
 
+    # --- compatibility with APIs removed in Qiskit 1.0/2.0 ----------------------------
+    # The analyzed projects target several Qiskit versions; without these aliases a call
+    # such as qc.cnot(0, 1) would stop the statement (and the rest of a loop) here.
+    _compat_aliases(QuantumCircuit)
+
     # --- register circuits created by the analyzed code -----------------------------
     orig_init = QuantumCircuit.__init__
+    try:
+        import numpy as np  # noqa
+        _int_types = (int, np.integer)
+    except Exception:
+        _int_types = (int,)
+    from qiskit.circuit import Register, Bit
+
+    def _usable(x):
+        if isinstance(x, bool):
+            return False
+        if isinstance(x, _int_types) or isinstance(x, Register):
+            return True
+        return isinstance(x, (list, tuple)) and all(isinstance(b, Bit) for b in x)
 
     def patched_init(self, *a, **k):
-        orig_init(self, *a, **k)
+        try:
+            orig_init(self, *a, **k)
+        except Exception:
+            # Sizes that are unknown in the generated script (mocked self attributes,
+            # unresolved helpers) become 0; registers then grow on first use (see below).
+            a2 = [x if _usable(x) else 0 for x in a]
+            k2 = {kk: vv for kk, vv in k.items()
+                  if (kk == "name" and isinstance(vv, str)) or (kk == "global_phase" and isinstance(vv, (int, float)))}
+            try:
+                orig_init(self, *a2, **k2)
+            except Exception:
+                orig_init(self)
         if state["main"]:
             f = sys._getframe(1)
             if os.path.abspath(f.f_code.co_filename) == script:
@@ -120,6 +184,28 @@ def main():
     QuantumCircuit.__init__ = patched_init
 
     # --- grow circuits when synthetic sizes are too small -----------------------------
+    from qiskit.circuit import Qubit, Clbit
+
+    def _foreign(self, rep, kind):
+        """Registers and bits in rep that the circuit does not contain."""
+        bit_cls = Qubit if kind == "q" else Clbit
+        reg_cls = QuantumRegister if kind == "q" else ClassicalRegister
+        regs, bits = [], []
+        stack = [rep]
+        while stack:
+            x = stack.pop()
+            if isinstance(x, reg_cls):
+                if x not in (self.qregs if kind == "q" else self.cregs):
+                    regs.append(x)
+            elif isinstance(x, bit_cls):
+                try:
+                    self.find_bit(x)
+                except Exception:
+                    bits.append(x)
+            elif isinstance(x, (list, tuple)):
+                stack.extend(x)
+        return regs, bits
+
     def make_conv(orig, kind):
         def conv(self, rep):
             try:
@@ -130,6 +216,24 @@ def main():
                 if idx is not None and size <= idx < 4096:
                     reg_cls = QuantumRegister if kind == "q" else ClassicalRegister
                     self.add_register(reg_cls(idx + 1 - size, f"_qsx{kind}{len(self.qregs) + len(self.cregs)}"))
+                    return orig(self, rep)
+                # Bits or registers created outside the circuit (e.g., the circuit was built
+                # with an unknown size): add them, so the operation is kept.
+                regs, bits = _foreign(self, rep, kind)
+                if regs or bits:
+                    for r in regs:
+                        try:
+                            self.add_register(r)
+                        except Exception:
+                            bits.extend(b for b in r if b not in bits)
+                    new = []
+                    for b in bits:
+                        try:
+                            self.find_bit(b)
+                        except Exception:
+                            new.append(b)
+                    if new:
+                        self.add_bits(new)
                     return orig(self, rep)
                 raise
         return conv

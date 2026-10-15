@@ -84,5 +84,17 @@
    "NC",
    ""
   ]
+ ],
+ "r24_old_api_and_unknown_size": [
+  [
+   "IM",
+   "0"
+  ]
+ ],
+ "r25_registers_im": [
+  [
+   "IM",
+   "3"
+  ]
  ]
 }
