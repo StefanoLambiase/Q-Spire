@@ -27,4 +27,8 @@ r26_subtest_blocks | legacy: OK  [('IM', '0')] | real: OK  [('IM', '0')] | expec
 r27_downstream_failure | legacy: BAD [] | real: OK  [('IM', '0')] | expected [('IM', '0')]
 r28_failing_assert | legacy: BAD [] | real: OK  [('IM', '0')] | expected [('IM', '0')]
 r30_nc_pass_manager_mock | legacy: OK  [] | real: OK  [] | expected []
-passed: {'legacy': 8, 'real': 29} of 29
+r31_u2_u3_names | legacy: OK  [] | real: OK  [] | expected []
+r32_circuit_addition | legacy: BAD [] | real: OK  [('IM', '0')] | expected [('IM', '0')]
+r33_nc_pass_on_dag | legacy: BAD [('NC', '')] | real: OK  [] | expected []
+r34_nc_values_in_run | legacy: BAD [('ROC', '')] | real: OK  [] | expected []
+passed: {'legacy': 9, 'real': 33} of 33

@@ -201,8 +201,11 @@ class RunExecuteParametersCalls:
             'column_end': column_end
         }
 
-        # qspire-fix: a pass manager's run() transpiles circuits and does not execute them
-        is_pass_manager = func_name == 'run' and 'PassManager' in type(original_obj).__name__
+        # qspire-fix: a pass manager's or a transpiler pass's run() transpiles circuits (or
+        # DAGs) and does not execute them
+        is_pass_manager = func_name == 'run' and ('PassManager' in type(original_obj).__name__
+                                                  or _is_transpiler_pass(original_obj)
+                                                  or (args and type(args[0]).__name__ in ('DAGCircuit', 'DAGDependency')))
         if is_pass_manager:
             try:
                 return getattr(original_obj, original_method_name)(*args, **kwargs)
@@ -224,7 +227,11 @@ class RunExecuteParametersCalls:
                     return int(getattr(values, 'num_parameters', 0) or 0) > 0
                 except Exception:
                     return False
-            if any(_binds(p) for p in pubs):
+            # qspire-fix: parameter values passed to run() next to the circuits, e.g.
+            # estimator.run(circuits, observables, parameter_values) (V1 primitives and
+            # gradients) or backend.run(circuits, parameter_binds=...) (Aer)
+            extra = list(args[1:]) + [v for k, v in kwargs.items() if k in ('parameter_values', 'parameter_binds')]
+            if any(_binds(p) for p in pubs) or any(_looks_like_values(x) for x in extra):
                 self.call_info['assign_parameters'].append(dict(call_record))
         
         # Execute the original function
@@ -288,6 +295,34 @@ class MockResult:
     
     def get_memory(self, circuit=None):
         return ['00', '11'] * 50  # Mock memory data
+
+
+def _is_transpiler_pass(obj):
+    try:
+        from qiskit.transpiler.basepasses import BasePass
+        return isinstance(obj, BasePass)
+    except Exception:
+        return False
+
+
+def _looks_like_values(x, depth=0):
+    """True for parameter values: numbers, possibly nested in lists/tuples/arrays/dicts."""
+    import numbers
+    try:
+        import numpy as np
+        if isinstance(x, np.ndarray):
+            return x.size > 0 and np.issubdtype(x.dtype, np.number)
+    except Exception:
+        pass
+    if isinstance(x, bool) or x is None or isinstance(x, str):
+        return False
+    if isinstance(x, numbers.Number):
+        return depth > 0
+    if isinstance(x, dict):
+        return len(x) > 0 and all(_looks_like_values(v, depth + 1) or isinstance(v, (list, tuple)) for v in x.values())
+    if isinstance(x, (list, tuple)) and depth < 3:
+        return len(x) > 0 and all(_looks_like_values(v, depth + 1) for v in x)
+    return False
 
 
 class FunctionCallInstrumentor(ast.NodeTransformer):

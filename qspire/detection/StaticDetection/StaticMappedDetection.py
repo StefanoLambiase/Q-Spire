@@ -778,6 +778,7 @@ def _map_function_lines_regex(original_func: Dict, main_block: Dict, similarity_
     line_mappings = []
     
     # For each line in the MAIN BLOCK, find the best match in the ORIGINAL FUNCTION
+    last_mapped = -1
     for main_line in main_lines:
         main_content = main_line['stripped_content']
         
@@ -795,17 +796,29 @@ def _map_function_lines_regex(original_func: Dict, main_block: Dict, similarity_
         
         best_match = None
         best_similarity = 0.0
+        ties = []
         
         # Find the best matching line in executable original lines
         for orig_line in executable_original_lines:
             similarity = calculate_similarity(main_content, orig_line['stripped_content'])
             
-            if similarity > best_similarity:
+            if similarity > best_similarity + 1e-12:
                 best_similarity = similarity
                 best_match = orig_line
+                ties = [orig_line]
+            elif best_match is not None and abs(similarity - best_similarity) <= 1e-12:
+                ties.append(orig_line)
+
+        # qspire-fix: when the same statement occurs more than once, keep the order of the
+        # function body (the first candidate after the previous mapped line), instead of
+        # always mapping to the first occurrence
+        if len(ties) > 1:
+            after = [t for t in ties if t['line_number'] > last_mapped]
+            best_match = after[0] if after else ties[0]
         
         # Only include the mapping if similarity meets threshold
         if best_match and best_similarity >= similarity_threshold:
+            last_mapped = best_match['line_number']
             line_mappings.append({
                 "generated_line": main_line['line_number'],
                 "generated_content": main_line['content'],

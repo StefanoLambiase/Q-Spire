@@ -25,6 +25,7 @@ import signal
 import sys
 
 MARK = "@@QSPIRE_JSON@@"
+_THIS = os.path.abspath(__file__)
 
 
 class _StatementTimeout(BaseException):
@@ -68,18 +69,40 @@ def _compat_aliases(QuantumCircuit):
     alias("toffoli", lambda self, c1, c2, t, *a, **k: self.ccx(c1, c2, t))
     alias("fredkin", lambda self, c, t1, t2, *a, **k: self.cswap(c, t1, t2))
     alias("i", lambda self, q: self.id(q))
-    alias("u1", lambda self, lam, q: self.p(lam, q))
-    alias("u2", lambda self, phi, lam, q: self.u(math.pi / 2, phi, lam, q))
-    alias("u3", lambda self, theta, phi, lam, q: self.u(theta, phi, lam, q))
-    alias("cu1", lambda self, lam, c, t, *a, **k: self.cp(lam, c, t))
-    alias("cu3", lambda self, theta, phi, lam, c, t, *a, **k: self.cu(theta, phi, lam, 0, c, t))
+    # the u1/u2/u3 gate classes still exist: keep their names (ROC compares gate names)
+    from qiskit.circuit.library import U1Gate, U2Gate, U3Gate, CU1Gate, CU3Gate
+    alias("u1", lambda self, lam, q: self.append(U1Gate(lam), [q]))
+    alias("u2", lambda self, phi, lam, q: self.append(U2Gate(phi, lam), [q]))
+    alias("u3", lambda self, theta, phi, lam, q: self.append(U3Gate(theta, phi, lam), [q]))
+    alias("cu1", lambda self, lam, c, t, *a, **k: self.append(CU1Gate(lam), [c, t]))
+    alias("cu3", lambda self, theta, phi, lam, c, t, *a, **k: self.append(CU3Gate(theta, phi, lam), [c, t]))
     alias("mct", lambda self, controls, target, *a, **k: self.mcx(controls, target))
     alias("bind_parameters", lambda self, values: self.assign_parameters(values))
     alias("snapshot", lambda self, *a, **k: None)
-    alias("combine", lambda self, other: self.compose(other))
-    alias("extend", lambda self, other: self.compose(other, inplace=True) or self)
+    def _fit(self, other):
+        # old `+` matched registers by name; here circuits are joined qubit by qubit, so
+        # grow the left circuit when the right one is wider
+        from qiskit.circuit import QuantumRegister, ClassicalRegister
+        if other.num_qubits > self.num_qubits:
+            self.add_register(QuantumRegister(other.num_qubits - self.num_qubits, f"_qsadd{len(self.qregs)}"))
+        if other.num_clbits > self.num_clbits:
+            self.add_register(ClassicalRegister(other.num_clbits - self.num_clbits, f"_qsaddc{len(self.cregs)}"))
+
+    def _iadd(self, other):
+        _fit(self, other)
+        self.compose(other, inplace=True)
+        return self
+
+    def _add(self, other):
+        return _iadd(self.copy(), other)
+
+    alias("combine", _add)
+    alias("extend", _iadd)
+    # `qc + other` and `qc += other` were removed in Qiskit 1.0
     if not hasattr(QuantumCircuit, "__add__"):
-        QuantumCircuit.__add__ = lambda self, other: self.compose(other)
+        QuantumCircuit.__add__ = _add
+    if not hasattr(QuantumCircuit, "__iadd__"):
+        QuantumCircuit.__iadd__ = _iadd
     # c_if was removed in Qiskit 2.0: keep the operation, drop the classical condition
     for cls in (InstructionSet, Instruction):
         if not hasattr(cls, "c_if"):
@@ -262,6 +285,30 @@ def main():
     QuantumCircuit.append = wrap_append(QuantumCircuit.append)
     QuantumCircuit._append_standard_gate = wrap_append(QuantumCircuit._append_standard_gate)
     QuantumCircuit._append = wrap_append(QuantumCircuit._append)  # e.g. barrier(), compose()
+
+    # --- circuits returned by combining circuits in the analyzed code -------------------
+    # qc3 = qc1.compose(qc2), qc1 + qc2, qc1.tensor(qc2) build a new circuit in the function
+    def wrap_new(meth):
+        def w(self, *a, **k):
+            r = meth(self, *a, **k)
+            try:
+                if state["main"] and isinstance(r, QuantumCircuit) and r is not self:
+                    # only direct calls from the analyzed code (skipping this runner's
+                    # own helpers, e.g. the `+` alias), not calls inside library code
+                    f = sys._getframe(1)
+                    while f is not None and os.path.abspath(f.f_code.co_filename) == _THIS:
+                        f = f.f_back
+                    if (f is not None and os.path.abspath(f.f_code.co_filename) == script
+                            and all(r is not c for c, _ in registry)):
+                        registry.append((r, f.f_lineno))
+            except Exception:
+                pass
+            return r
+        return w
+    QuantumCircuit.compose = wrap_new(QuantumCircuit.compose)
+    QuantumCircuit.tensor = wrap_new(QuantumCircuit.tensor)
+    if hasattr(QuantumCircuit, "__add__"):
+        QuantumCircuit.__add__ = wrap_new(QuantumCircuit.__add__)
 
     # --- execute ----------------------------------------------------------------------
     ns = {"__name__": "__main__", "__file__": script, "__builtins__": builtins}

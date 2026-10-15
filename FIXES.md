@@ -21,12 +21,16 @@ This branch fixes problems found while validating Q-Spire's detections for the E
 | 13 | When AutoFix fails (e.g., a final `assert` that cannot hold with mocks), it stores `None` as mapping. `get_function_smells` then calls `.items()` on `None` inside a bare `except: pass`. | All smells of the function are lost silently. | r28 |
 | 15 | The ROC detector returns a flat list of rows, while the row mapping expects tuples. | ROC rows were never mapped to the original file: they are lines of the generated script. | — |
 | 16 | NC counts `run()` on any object. When the object is a mock (e.g., a pass manager whose passes come from a missing package), a transpilation is counted as an execution. | False NC. | r30 |
+| 17 | Code written for Qiskit < 1.0 uses `qc += other` and `qc1 + qc2`, which no longer exist. | The statement fails and the added part is missing (e.g., two barriers end up next to each other, a false ROC). | r32 |
+| 18 | `u1`/`u2`/`u3` were mapped to `p`/`u`/`u`. | `u2` followed by `u3` looked like a repetition (false ROC). | r31 |
+| 19 | NC counts `run()` of transpiler passes on DAGs, and ignores parameter values passed to `run()` next to the circuits (V1 primitives, gradients, `parameter_binds`). | False NC. | r33, r34 |
+| 20 | The line mapping picks the first line with the same text. | When a statement occurs twice in a function, the reported row is the first occurrence. | — |
 | 14 | The mocked `self` returns `None` for every method, so `with self.subTest(...)` and `with self.assertRaises(...)` fail, and AutoFix deletes the whole block. | Circuits built inside such blocks, common in test files, are lost. | r26 |
 
-The regression suite is in `regression/` (29 cases with expected smells; `regression/known_limitations/` holds one case that is still wrong):
+The regression suite is in `regression/` (33 cases with expected smells; `regression/known_limitations/` holds one case that is still wrong):
 
-- Original version: 7–9 of the first 28. The original version is not deterministic on a few cases.
-- This branch: 29 of 29.
+- Original version: 9 of 33 in the last run. The original version is not deterministic on a few cases.
+- This branch: 33 of 33.
 
 ## 2. Changes
 
@@ -35,7 +39,8 @@ The regression suite is in `regression/` (29 cases with expected smells; `regres
   - `return`/`sys.exit` ends the body. Each statement has its own timeout, and an error stops only that statement.
   - Registers grow when an index is out of range (sizes in generated scripts are synthetic). Bits and registers created outside the circuit are added.
   - User-defined gates are expanded. Control-flow operations count as one operation.
-  - Aliases are provided for APIs removed in Qiskit 1.0/2.0: `cnot`, `toffoli`, `fredkin`, `u1/u2/u3`, `cu1/cu3`, `mct`, `bind_parameters`, `c_if`, `combine`, `extend`.
+  - Aliases are provided for APIs removed in Qiskit 1.0/2.0: `cnot`, `toffoli`, `fredkin`, `u1/u2/u3` and `cu1/cu3` (with the original gate classes, so names are kept), `mct`, `bind_parameters`, `c_if`, `combine`, `extend`, `+` and `+=`.
+  - Circuits returned by `compose`, `tensor` and `+` called in the analysed code are recorded as new circuits.
   - Instructions added through `append`, `_append` and the standard-gate methods record their source line.
   - Results are cached per script. Concurrent requests share one run, and at most `QSPIRE_TRACKER_JOBS` runs happen at once.
 - **`smells/utils/OperationCircuitTracker.py`.** `analyze_quantum_file` delegates to the new tracker. The old code remains as `analyze_quantum_file_legacy` (`QSPIRE_TRACKER=legacy`).
@@ -50,6 +55,7 @@ The regression suite is in `regression/` (29 cases with expected smells; `regres
 - **`smells/CG/CGDetector.py`.** A bare `unitary(...)` counts only if it is imported from Qiskit. `.unitary(...)` needs a matrix and qubits.
 - **`smells/utils/RunExecuteParametersCalls.py` (NC).**
   - The script is run statement by statement (see AutoFix below), descending into the `__main__` block.
+  - `run()` of a transpiler pass, or on a DAG, is not an execution. Parameter values passed to `run()` next to the circuits (`run(circuits, observables, values)`, `parameter_values=`, `parameter_binds=`) count as a binding.
   - `PassManager.run` is not an execution: neither when the object is a pass manager, nor when the receiver is a name bound to `PassManager(...)`/`generate_preset_pass_manager(...)` in the source, a name such as `pm` or `pass_manager`, or a `PassManager(...).run(...)` chain.
   - PUBs with parameter values count as a binding.
   - The in-process execution stops after `QSPIRE_NC_EXEC_TIMEOUT` seconds.
@@ -64,6 +70,7 @@ The regression suite is in `regression/` (29 cases with expected smells; `regres
   - **AutoFix is skipped** when the new tracker is used (`QSPIRE_AUTOFIX=1` restores it). The detectors run the generated script statement by statement and skip what fails. For NC, an undefined name is bound to a mock and the statement is run again, as AutoFix would do, after discarding the calls recorded in the failed attempt. AutoFix took about 80% of the analysis time, since it re-runs the script after every fix, and it could delete circuit-building code. Without it, the analysis is about four times faster.
   - A failed AutoFix no longer drops the smells of the function. The row mapping of each smell is guarded, and errors are printed instead of being swallowed.
   - ROC rows are mapped to the original file.
+  - The line mapping keeps the order of the function body, so a statement that occurs twice is mapped to the right occurrence.
 - **`detection/StaticDetection/StaticCircuit.py` (mocked `self`).** Methods of the mocked `self` return an object that can be called, iterated and used as a context manager, and that suppresses exceptions on exit, as `subTest` and `assertRaises` do.
 
 ## 3. Environment variables
