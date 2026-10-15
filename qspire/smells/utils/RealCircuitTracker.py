@@ -1,0 +1,56 @@
+"""Circuit tracker based on the execution of the analyzed code with the real Qiskit.
+
+Drop-in replacement of OperationCircuitTracker.analyze_quantum_file: it returns
+{circuit_name: [operation dicts]} in the same format, so the IM, IdQ, IQ, ROC and
+LC detectors are unchanged. The code is executed in a separate process (see
+_real_circuit_runner.py) with a timeout, and the result is cached per file so
+that the five detectors do not execute the same file five times.
+"""
+import json
+import os
+import subprocess
+import sys
+import threading
+
+_RUNNER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_real_circuit_runner.py")
+_MARK = "@@QSPIRE_JSON@@"
+_cache = {}
+_lock = threading.Lock()
+LAST_ERRORS = {}
+
+
+def analyze_quantum_file(input_file, output_file=None, debug=False, timeout=None):
+    path = os.path.abspath(input_file)
+    try:
+        key = (path, os.path.getmtime(path), os.path.getsize(path))
+    except OSError:
+        return {}
+    with _lock:
+        if key in _cache:
+            return _cache[key]
+    timeout = timeout or int(os.environ.get("QSPIRE_TRACKER_TIMEOUT", "180"))
+    per_stmt = os.environ.get("QSPIRE_STATEMENT_TIMEOUT", "30")
+    circuits, errors = {}, []
+    try:
+        proc = subprocess.run([sys.executable, _RUNNER, path, per_stmt], capture_output=True, text=True,
+                              timeout=timeout, cwd=os.path.dirname(path))
+        for line in proc.stdout.splitlines()[::-1]:
+            if line.startswith(_MARK):
+                data = json.loads(line[len(_MARK):])
+                circuits, errors = data.get("circuits", {}), data.get("errors", [])
+                break
+        else:
+            errors = [f"runner exit {proc.returncode}: {proc.stderr[-300:]}"]
+    except subprocess.TimeoutExpired:
+        errors = ["runner timeout"]
+    except Exception as e:  # noqa
+        errors = [f"runner failure: {type(e).__name__}: {e}"]
+    if debug:
+        print(f"[RealCircuitTracker] {path}: {len(circuits)} circuits; errors: {errors[:5]}")
+    with _lock:
+        _cache[key] = circuits
+        LAST_ERRORS[path] = errors
+    if output_file:
+        with open(output_file, "w") as f:
+            json.dump(circuits, f, indent=2)
+    return circuits

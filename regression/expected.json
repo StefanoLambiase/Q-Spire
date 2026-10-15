@@ -1,0 +1,88 @@
+{
+ "r01_terminal_only": [],
+ "r02_two_functions_same_name": [],
+ "r03_im_with_return": [
+  [
+   "IM",
+   "0"
+  ]
+ ],
+ "r04_im_no_return": [
+  [
+   "IM",
+   "0"
+  ]
+ ],
+ "r05_parametric_gate_index": [],
+ "r06_delay": [],
+ "r07_idle_qubit": [
+  [
+   "IdQ",
+   "1"
+  ],
+  [
+   "IQ",
+   "1"
+  ]
+ ],
+ "r08_loop_variable_range": [
+  [
+   "LC",
+   ""
+  ],
+  [
+   "ROC",
+   ""
+  ]
+ ],
+ "r09_if_test": [
+  [
+   "IM",
+   "0"
+  ]
+ ],
+ "r10_switch_cases": [
+  [
+   "IM",
+   "0"
+  ]
+ ],
+ "r11_registers": [],
+ "r12_repeated_block": [
+  [
+   "ROC",
+   ""
+  ]
+ ],
+ "r13_subcircuit_append": [
+  [
+   "IM",
+   "0"
+  ]
+ ],
+ "r14_module_level": [],
+ "r15_cg_matrix_method": [],
+ "r16_cg_local_function": [],
+ "r17_cg_true": [
+  [
+   "CG",
+   ""
+  ]
+ ],
+ "r18_lpq_local_transpile": [],
+ "r19_lpq_kwargs": [],
+ "r20_lpq_true": [
+  [
+   "LPQ",
+   ""
+  ]
+ ],
+ "r21_nc_pass_manager": [],
+ "r22_nc_pub_binding": [],
+ "r23_nc_true": [
+  [
+   "NC",
+   ""
+  ]
+ ]
+}

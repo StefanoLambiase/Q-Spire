@@ -136,8 +136,23 @@ class RunExecuteParametersCalls:
             'column_start': column_start,
             'column_end': column_end
         }
-        
+
+        # qspire-fix: a pass manager's run() transpiles circuits and does not execute them
+        is_pass_manager = func_name == 'run' and 'PassManager' in type(original_obj).__name__
+        if is_pass_manager:
+            try:
+                return getattr(original_obj, original_method_name)(*args, **kwargs)
+            except Exception:
+                return args[0] if args else None
+
         self.call_info[func_name].append(call_record)
+
+        # qspire-fix: primitive PUBs such as sampler.run([(circuit, parameter_values)]) bind
+        # parameters at execution time, so they count as a binding as well
+        if func_name == 'run' and args:
+            pubs = args[0] if isinstance(args[0], (list, tuple)) else [args[0]]
+            if any(isinstance(p, tuple) and len(p) >= 2 and p[1] is not None for p in pubs):
+                self.call_info['assign_parameters'].append(dict(call_record))
         
         # Execute the original function
         try:

@@ -1064,6 +1064,16 @@ class MockQuantumCircuit:
             raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
         return lambda *args, **kwargs: self
 
+    # qspire-fix: allow control-flow builders (with qc.if_test(...), with qc.switch(...) as case, with case(0))
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def __call__(self, *args, **kwargs):
+        return self
+
 # Override the standard QuantumCircuit with our mock
 QuantumCircuit = MockQuantumCircuit
 
