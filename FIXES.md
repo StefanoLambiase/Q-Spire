@@ -19,12 +19,14 @@ This branch fixes problems found while validating Q-Spire's detections for the E
 | 11 | All functions of a file are analysed at once, one thread per function, and every detector re-runs the same script. AutoFix and NC runs have no time limit. | Memory peaks on files with many test functions, and runs can hang on long-running code. | — |
 | 12 | When later code fails on the mock circuit (e.g., the circuit is passed to `circuit_to_dag` or a pass manager), AutoFix deletes the whole assignment of the circuit and its uses, replacing it with a generic mock. | The circuit disappears from the script that the detectors analyse. | r27 |
 | 13 | When AutoFix fails (e.g., a final `assert` that cannot hold with mocks), it stores `None` as mapping. `get_function_smells` then calls `.items()` on `None` inside a bare `except: pass`. | All smells of the function are lost silently. | r28 |
+| 15 | The ROC detector returns a flat list of rows, while the row mapping expects tuples. | ROC rows were never mapped to the original file: they are lines of the generated script. | — |
+| 16 | NC counts `run()` on any object. When the object is a mock (e.g., a pass manager whose passes come from a missing package), a transpilation is counted as an execution. | False NC. | r30 |
 | 14 | The mocked `self` returns `None` for every method, so `with self.subTest(...)` and `with self.assertRaises(...)` fail, and AutoFix deletes the whole block. | Circuits built inside such blocks, common in test files, are lost. | r26 |
 
-The regression suite is in `regression/` (28 cases with expected smells):
+The regression suite is in `regression/` (29 cases with expected smells; `regression/known_limitations/` holds one case that is still wrong):
 
-- Original version: 7–9 of 28. The original version is not deterministic on a few cases.
-- This branch: 28 of 28.
+- Original version: 7–9 of the first 28. The original version is not deterministic on a few cases.
+- This branch: 29 of 29.
 
 ## 2. Changes
 
@@ -34,6 +36,7 @@ The regression suite is in `regression/` (28 cases with expected smells):
   - Registers grow when an index is out of range (sizes in generated scripts are synthetic). Bits and registers created outside the circuit are added.
   - User-defined gates are expanded. Control-flow operations count as one operation.
   - Aliases are provided for APIs removed in Qiskit 1.0/2.0: `cnot`, `toffoli`, `fredkin`, `u1/u2/u3`, `cu1/cu3`, `mct`, `bind_parameters`, `c_if`, `combine`, `extend`.
+  - Instructions added through `append`, `_append` and the standard-gate methods record their source line.
   - Results are cached per script. Concurrent requests share one run, and at most `QSPIRE_TRACKER_JOBS` runs happen at once.
 - **`smells/utils/OperationCircuitTracker.py`.** `analyze_quantum_file` delegates to the new tracker. The old code remains as `analyze_quantum_file_legacy` (`QSPIRE_TRACKER=legacy`).
 - **`detection/StaticDetection/StaticCircuit.py`.** The mock circuit is now a context manager and is callable. Its constructor accepts registers, unknown sizes and extra arguments.
@@ -47,7 +50,7 @@ The regression suite is in `regression/` (28 cases with expected smells):
 - **`smells/CG/CGDetector.py`.** A bare `unitary(...)` counts only if it is imported from Qiskit. `.unitary(...)` needs a matrix and qubits.
 - **`smells/utils/RunExecuteParametersCalls.py` (NC).**
   - The script is run statement by statement (see AutoFix below), descending into the `__main__` block.
-  - `PassManager.run` is not an execution.
+  - `PassManager.run` is not an execution: neither when the object is a pass manager, nor when the receiver is a name bound to `PassManager(...)`/`generate_preset_pass_manager(...)` in the source, a name such as `pm` or `pass_manager`, or a `PassManager(...).run(...)` chain.
   - PUBs with parameter values count as a binding.
   - The in-process execution stops after `QSPIRE_NC_EXEC_TIMEOUT` seconds.
 - **`smells/utils/mock_missing.py` and `smells/utils/_mockpath/sitecustomize.py` (new).**
@@ -60,6 +63,7 @@ The regression suite is in `regression/` (28 cases with expected smells):
   - A copy of each generated script is kept before AutoFix (`<script>.prefix`). The circuit tracker runs this copy; a statement that fails is skipped there, so no circuit-building code is deleted. The line mapping is computed on the same copy, instead of racing with AutoFix on the same file. The copy is not used if it has a syntax error that only AutoFix repairs.
   - **AutoFix is skipped** when the new tracker is used (`QSPIRE_AUTOFIX=1` restores it). The detectors run the generated script statement by statement and skip what fails. For NC, an undefined name is bound to a mock and the statement is run again, as AutoFix would do, after discarding the calls recorded in the failed attempt. AutoFix took about 80% of the analysis time, since it re-runs the script after every fix, and it could delete circuit-building code. Without it, the analysis is about four times faster.
   - A failed AutoFix no longer drops the smells of the function. The row mapping of each smell is guarded, and errors are printed instead of being swallowed.
+  - ROC rows are mapped to the original file.
 - **`detection/StaticDetection/StaticCircuit.py` (mocked `self`).** Methods of the mocked `self` return an object that can be called, iterated and used as a context manager, and that suppresses exceptions on exit, as `subTest` and `assertRaises` do.
 
 ## 3. Environment variables
