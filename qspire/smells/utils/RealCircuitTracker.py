@@ -12,6 +12,11 @@ import subprocess
 import sys
 import threading
 
+from smells.utils import mock_missing
+
+# third-party modules missing in the analysis environment are mocked in child processes
+mock_missing.enable_for_children()
+
 _RUNNER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_real_circuit_runner.py")
 _MARK = "@@QSPIRE_JSON@@"
 _cache = {}
@@ -21,6 +26,7 @@ _lock = threading.Lock()
 # concurrent runner processes (each imports Qiskit) to avoid exhausting memory.
 _slots = threading.BoundedSemaphore(int(os.environ.get("QSPIRE_TRACKER_JOBS", str(os.cpu_count() or 2))))
 LAST_ERRORS = {}
+_inflight = {}
 
 
 def analyze_quantum_file(input_file, output_file=None, debug=False, timeout=None):
@@ -29,9 +35,26 @@ def analyze_quantum_file(input_file, output_file=None, debug=False, timeout=None
         key = (path, os.path.getmtime(path), os.path.getsize(path))
     except OSError:
         return {}
-    with _lock:
-        if key in _cache:
-            return _cache[key]
+    # The detectors of a function run in parallel threads and ask for the same file at the
+    # same time: compute it once and let the other callers wait for the result.
+    while True:
+        with _lock:
+            if key in _cache:
+                return _cache[key]
+            ev = _inflight.get(key)
+            if ev is None:
+                ev = _inflight[key] = threading.Event()
+                break
+        ev.wait()
+    try:
+        return _compute(path, key, output_file, debug, timeout)
+    finally:
+        with _lock:
+            _inflight.pop(key, None)
+        ev.set()
+
+
+def _compute(path, key, output_file, debug, timeout):
     timeout = timeout or int(os.environ.get("QSPIRE_TRACKER_TIMEOUT", "180"))
     per_stmt = os.environ.get("QSPIRE_STATEMENT_TIMEOUT", "30")
     circuits, errors = {}, []

@@ -1,4 +1,6 @@
 import ast
+import contextlib
+import time
 import re
 import importlib.util
 import sys
@@ -84,7 +86,24 @@ class RunExecuteParametersCalls:
             
             try:
                 # Execute the instrumented code
-                exec(compiled_code, exec_globals)
+                # qspire-fix: missing third-party modules are mocked instead of stopping the run
+                from smells.utils import mock_missing
+                ctx = mock_missing.active() if mock_missing.enabled() else contextlib.nullcontext()
+                # qspire-fix: bound the in-process execution (checked at every function call)
+                deadline = time.time() + float(os.environ.get("QSPIRE_NC_EXEC_TIMEOUT", "60"))
+
+                def _deadline_tracer(frame, event, arg):
+                    if time.time() > deadline:
+                        raise TimeoutError("qspire: NC execution time limit")
+                    return None
+
+                previous_tracer = sys.gettrace()
+                sys.settrace(_deadline_tracer)
+                try:
+                    with ctx:
+                        exec(compiled_code, exec_globals)
+                finally:
+                    sys.settrace(previous_tracer)
             except SystemExit as e:
                 # Catch sys.exit() calls - this is expected behavior in analyzed code
                 if debug:
