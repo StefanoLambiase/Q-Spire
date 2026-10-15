@@ -5477,6 +5477,11 @@ def _map_smell_rows(smell, auto_fix_map_var, map_lines_of_code_var):
         # Store the final mapped rows
         original_rows = []
 
+        # qspire-fix: the ROC detector returns a flat list of rows, while this loop expects
+        # tuples, so ROC rows were never mapped to the original file
+        if all(isinstance(x, int) for x in rows):
+            rows = [tuple(rows)]
+
         for row_tuple in rows:
 
             if not isinstance(row_tuple, tuple):

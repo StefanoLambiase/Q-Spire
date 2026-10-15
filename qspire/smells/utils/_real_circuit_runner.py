@@ -261,6 +261,7 @@ def main():
         return w
     QuantumCircuit.append = wrap_append(QuantumCircuit.append)
     QuantumCircuit._append_standard_gate = wrap_append(QuantumCircuit._append_standard_gate)
+    QuantumCircuit._append = wrap_append(QuantumCircuit._append)  # e.g. barrier(), compose()
 
     # --- execute ----------------------------------------------------------------------
     ns = {"__name__": "__main__", "__file__": script, "__builtins__": builtins}
