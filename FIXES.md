@@ -1,6 +1,6 @@
 # Fixes to Q-Spire static mode (branch `fix/circuit-scope`)
 
-This branch fixes problems found while validating Q-Spire's detections for the EMSE revision of "A Cross-Sectional Analysis of Quantum-Specific Code Smells in Open Source Software Communities". It starts from commit `ce8c41b`. Every change is marked in the code with `qspire-fix`.
+This branch fixes problems found while validating Q-Spire's static-mode detections by hand on a sample of open-source repositories. It starts from commit `ce8c41b`. Every change is marked in the code with `qspire-fix`.
 
 ## 1. Problems
 

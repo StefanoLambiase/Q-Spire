@@ -2,7 +2,7 @@
 import csv, json, os, subprocess, sys, glob, concurrent.futures as cf
 QS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "qspire")
 # baseline: the original Q-Spire (commit ce8c41b) checked out as a git worktree
-ORIG = os.environ.get("QSPIRE_ORIG", "/home/claude/qspire_orig/qspire")
+ORIG = os.environ.get("QSPIRE_ORIG", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "qspire_orig", "qspire"))
 QS = os.environ.get("QSPIRE_FIXED", QS)
 ROOT = {"legacy": ORIG, "real": QS}
 VERSIONS = ("real",) if os.environ.get("REG_ONLY_REAL") else ("legacy", "real")
